@@ -29,7 +29,8 @@ system:
   min_opacity: 0.005
   prompt_processor_type: "stable-diffusion-prompt-processor"
   prompt_processor:
-    pretrained_model_name_or_path: "runwayml/stable-diffusion-v1-5"
+    # pretrained_model_name_or_path: "runwayml/stable-diffusion-v1-5"
+    pretrained_model_name_or_path: "stable-diffusion-v1-5/stable-diffusion-v1-5"
     prompt: 'a bicycle parked next to a bench in a park, all covered with snow, winter'
 
   guidance_type: "stable-diffusion-instructpix2pix-guidance"

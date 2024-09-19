@@ -18,7 +18,7 @@ class GaussianEditor_Edit(GaussianEditor):
 
         seg_prompt: str = ""
 
-        second_guidance_type: str = "dds"
+        second_guidance_type: str = "stable-diffusion-instructpix2pix-dds-guidance"
         second_guidance: dict = field(default_factory=dict)
         dds_target_prompt_processor: dict = field(default_factory=dict)
         dds_source_prompt_processor: dict = field(default_factory=dict)

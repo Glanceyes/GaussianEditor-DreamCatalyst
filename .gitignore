@@ -162,7 +162,9 @@ cython_debug/
 *.tmp
 *.png
 tmp/
+dataset/
 outputs/
+results/
 log/
 logs/
 .vscode
@@ -170,6 +172,7 @@ logs/
 *.sqlite
 *.qdrep
 profile_outputs/
+edit_cache/
 saved/
 wandb/
 !images/*.png

@@ -33,15 +33,15 @@ system:
     pretrained_model_name_or_path: "stable-diffusion-v1-5/stable-diffusion-v1-5"
     prompt: 'Turn him into a clown'
 
-  # dds_target_prompt_processor:
-  #   # pretrained_model_name_or_path: "runwayml/stable-diffusion-v1-5"
-  #   pretrained_model_name_or_path: "stable-diffusion-v1-5/stable-diffusion-v1-5"
-  #   prompt: 'turn him into a clown'
+  dds_target_prompt_processor:
+    # pretrained_model_name_or_path: "runwayml/stable-diffusion-v1-5"
+    pretrained_model_name_or_path: "stable-diffusion-v1-5/stable-diffusion-v1-5"
+    prompt: 'turn him into a clown'
     
-  # dds_source_prompt_processor:
-  #   # pretrained_model_name_or_path: "runwayml/stable-diffusion-v1-5"
-  #   pretrained_model_name_or_path: "stable-diffusion-v1-5/stable-diffusion-v1-5"
-  #   prompt: 'a photo of a face'
+  dds_source_prompt_processor:
+    # pretrained_model_name_or_path: "runwayml/stable-diffusion-v1-5"
+    pretrained_model_name_or_path: "stable-diffusion-v1-5/stable-diffusion-v1-5"
+    prompt: 'a photo of a face'
 
   seg_prompt: 'a person'
 
@@ -52,6 +52,14 @@ system:
     guidance_scale: 7.5
     condition_scale: 1.5
 
+  second_guidance_type: "stable-diffusion-instructpix2pix-dds-guidance"
+  second_guidance:
+    min_step_percent: 0.2
+    max_step_percent: 0.9
+    psi: 1.0
+    use_dds: true
+    use_dreamcatalyst: true
+
   loggers:
     wandb:
       enable: false
@@ -61,13 +69,12 @@ system:
   loss:
     lambda_sparsity: 0.0
     lambda_opaque: 0.0
-    lambda_l1: 10.
-    # lambda_l1: 0.0
-    lambda_p: 10.
-    # lambda_p: 0.0
-    # lambda_dds: 0.
-    # lambda_dds: 10.0
-    lambda_dds: 0.0
+    # lambda_l1: 10.
+    lambda_l1: 0.0
+    # lambda_p: 10.
+    lambda_p: 0.0
+    lambda_dds: 10.0
+    # lambda_dds: 0.0
     lambda_anchor_color: 5
     lambda_anchor_geo: 50
     lambda_anchor_opacity: 50

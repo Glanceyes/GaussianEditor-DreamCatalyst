@@ -33,7 +33,8 @@ class EditGuidance:
         self.visible = True
         self.prompt_utils = StableDiffusionPromptProcessor(
             {
-                "pretrained_model_name_or_path": "runwayml/stable-diffusion-v1-5",
+                # "pretrained_model_name_or_path": "runwayml/stable-diffusion-v1-5",
+                "pretrained_model_name_or_path": "stable-diffusion-v1-5/stable-diffusion-v1-5",
                 "prompt": text_prompt,
             }
         )()

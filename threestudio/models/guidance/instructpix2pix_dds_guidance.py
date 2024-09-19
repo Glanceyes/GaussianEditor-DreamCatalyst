@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import cv2
+import math
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -15,8 +16,8 @@ from threestudio.utils.misc import C, parse_version
 from threestudio.utils.typing import *
 
 
-@threestudio.register("stable-diffusion-instructpix2pix-guidance")
-class InstructPix2PixGuidance(BaseObject):
+@threestudio.register("stable-diffusion-instructpix2pix-dds-guidance")
+class InstructPix2PixDDSGuidance(BaseObject):
     @dataclass
     class Config(BaseObject.Config):
         cache_dir: Optional[str] = None
@@ -36,12 +37,21 @@ class InstructPix2PixGuidance(BaseObject):
 
         fixed_size: int = -1
 
-        min_step_percent: float = 0.02
-        max_step_percent: float = 0.98
+        # min_step_percent: float = 0.2 # 0.02
+        # max_step_percent: float = 0.9 # 0.98
+        min_step_percent: float = 0.02 # 0.02
+        max_step_percent: float = 0.98 # 0.98
 
-        diffusion_steps: int = 20
+        diffusion_steps: int = 50 # 20
+        max_iteration: int = 1500
 
-        use_sds: bool = False
+        psi: float = 0.075
+        delta: float  = 0.2
+        gamma: float = 0.8
+
+        use_dds: bool = True
+        # use_dreamcatalyst: bool = True
+        use_dreamcatalyst: bool = False
 
     cfg: Config
 
@@ -110,10 +120,13 @@ class InstructPix2PixGuidance(BaseObject):
 
         self.grad_clip_val: Optional[float] = None
 
+        self.iteration = 0
+        self.max_iteration = self.cfg.max_iteration
+
         threestudio.info(f"Loaded InstructPix2Pix!")
 
     @torch.cuda.amp.autocast(enabled=False)
-    def set_min_max_steps(self, min_step_percent=0.02, max_step_percent=0.98):
+    def set_min_max_steps(self, min_step_percent=0.2, max_step_percent=0.9):
         self.min_step = int(self.num_train_timesteps * min_step_percent)
         self.max_step = int(self.num_train_timesteps * max_step_percent)
 
@@ -192,9 +205,7 @@ class InstructPix2PixGuidance(BaseObject):
                     )
 
                 # perform classifier-free guidance
-                noise_pred_text, noise_pred_image, noise_pred_uncond = noise_pred.chunk(
-                    3
-                )
+                noise_pred_text, noise_pred_image, noise_pred_uncond = noise_pred.chunk(3)
                 noise_pred = (
                     noise_pred_uncond
                     + self.cfg.guidance_scale * (noise_pred_text - noise_pred_image)
@@ -206,50 +217,76 @@ class InstructPix2PixGuidance(BaseObject):
             threestudio.debug("Editing finished.")
         return latents
 
-    def compute_grad_sds(
+    def compute_grad_dds(
         self,
-        text_embeddings: Float[Tensor, "BB 77 768"],
-        latents: Float[Tensor, "B 4 DH DW"],
+        tgt_latents: Float[Tensor, "B 4 DH DW"],
+        src_latents: Float[Tensor, "B 4 DH DW"],
+        tgt_text_embeddings: Float[Tensor, "BB 77 768"],
+        src_text_embeddings: Float[Tensor, "BB 77 768"],
         image_cond_latents: Float[Tensor, "B 4 DH DW"],
         t: Int[Tensor, "B"],
+        t_normalized: Int[Tensor, "B"] = None,
     ):
-        with torch.no_grad():
-            # add noise
-            noise = torch.randn_like(latents)  # TODO: use torch generator
-            latents_noisy = self.scheduler.add_noise(latents, noise, t)
-            # pred noise
-            latent_model_input = torch.cat([latents_noisy] * 3)
-            latent_model_input = torch.cat(
-                [latent_model_input, image_cond_latents], dim=1
-            )
+        eps = dict()
+        noise = torch.randn_like(tgt_latents)  # TODO: use torch generator
 
-            noise_pred = self.forward_unet(
-                latent_model_input, t, encoder_hidden_states=text_embeddings
-            )
+        for latent, cond_text_embedding, name in zip(
+            [tgt_latents, src_latents], [tgt_text_embeddings, src_text_embeddings], ["target", "source"]
+        ):
+            with torch.no_grad():
+            
+                # add noise
+                latents_noisy = self.scheduler.add_noise(tgt_latents, noise, t)
 
-        noise_pred_text, noise_pred_image, noise_pred_uncond = noise_pred.chunk(3)
-        noise_pred = (
-            noise_pred_uncond
-            + self.cfg.guidance_scale * (noise_pred_text - noise_pred_image)
-            + self.cfg.condition_scale * (noise_pred_image - noise_pred_uncond)
-        )
+                # pred noise
+                latent_model_input = torch.cat([latents_noisy] * 3)
+                latent_model_input = torch.cat(
+                    [latent_model_input, image_cond_latents], dim=1
+                )
 
-        w = (1 - self.alphas[t]).view(-1, 1, 1, 1)
-        grad = w * (noise_pred - noise)
+                noise_pred = self.forward_unet(
+                    latent_model_input, t, encoder_hidden_states=tgt_text_embeddings
+                )
+
+            noise_pred_text, noise_pred_image, noise_pred_uncond = noise_pred.chunk(3)
+            
+            if name == "target":
+                noise_pred = (
+                    noise_pred_uncond
+                    + self.cfg.guidance_scale * (noise_pred_text - noise_pred_image)
+                    + self.cfg.condition_scale * (noise_pred_image - noise_pred_uncond)
+                )
+            else:
+                noise_pred = (
+                    noise_pred_uncond 
+                    + self.cfg.condition_scale * (noise_pred_image - noise_pred_uncond)
+                )
+
+            eps[name] = noise_pred
+
+        if t_normalized is not None and self.cfg.use_dreamcatalyst:
+            w = self.cfg.delta + self.cfg.gamma * (t_normalized ** (1/math.e))
+            grad = (self.cfg.psi * (math.exp(t_normalized))) * (eps["target"] - eps["source"]) + w * (tgt_latents - src_latents)
+        else:
+            w = (1 - self.alphas[t]).view(-1, 1, 1, 1)
+            grad = w * (eps['target'] - eps['source'])
+        # grad = w * (noise_pred - noise)
         return grad
 
     def __call__(
         self,
         rgb: Float[Tensor, "B H W C"],
         cond_rgb: Float[Tensor, "B H W C"],
-        prompt_utils: PromptProcessorOutput,
+        target_prompt_utils: PromptProcessorOutput,
+        source_prompt_utils: PromptProcessorOutput,
         # TODO: DDS
         **kwargs,
     ):
         batch_size, H, W, _ = rgb.shape
 
         rgb_BCHW = rgb.permute(0, 3, 1, 2)
-        latents: Float[Tensor, "B 4 DH DW"]
+        target_latents: Float[Tensor, "B 4 DH DW"]
+        source_latents: Float[Tensor, "B 4 DH DW"]
         if self.cfg.fixed_size > 0:
             RH, RW = self.cfg.fixed_size, self.cfg.fixed_size
         else:
@@ -257,7 +294,7 @@ class InstructPix2PixGuidance(BaseObject):
         rgb_BCHW_HW8 = F.interpolate(
             rgb_BCHW, (RH, RW), mode="bilinear", align_corners=False
         )
-        latents = self.encode_images(rgb_BCHW_HW8)
+        target_latents = self.encode_images(rgb_BCHW_HW8)
 
         cond_rgb_BCHW = cond_rgb.permute(0, 3, 1, 2)
         cond_rgb_BCHW_HW8 = F.interpolate(
@@ -266,38 +303,69 @@ class InstructPix2PixGuidance(BaseObject):
             mode="bilinear",
             align_corners=False,
         )
+
+        source_latents = self.encode_images(cond_rgb_BCHW_HW8)
         cond_latents = self.encode_cond_images(cond_rgb_BCHW_HW8)
 
         temp = torch.zeros(1).to(rgb.device)
-        text_embeddings = prompt_utils.get_text_embeddings(temp, temp, temp, False)
-        text_embeddings = torch.cat(
-            [text_embeddings, text_embeddings[-1:]], dim=0
+        target_text_embeddings = target_prompt_utils.get_text_embeddings(temp, temp, temp, False)
+        target_text_embeddings = torch.cat(
+            [target_text_embeddings, target_text_embeddings[-1:]], dim=0
         )  # [positive, negative, negative]
 
-        # timestep ~ U(0.02, 0.98) to avoid very high/low noise level
-        t = torch.randint(
-            self.min_step,
-            self.max_step + 1,
-            [batch_size],
-            dtype=torch.long,
-            device=self.device,
-        )
+        source_text_embeddings = source_prompt_utils.get_text_embeddings(temp, temp, temp, False)
+        source_text_embeddings = torch.cat(
+            [source_text_embeddings, source_text_embeddings[-1:]], dim=0
+        )  # [positive, negative, negative]
 
-        if self.cfg.use_sds:
-            grad = self.compute_grad_sds(text_embeddings, latents, cond_latents, t)
+        if self.cfg.use_dreamcatalyst:
+            timesteps = reversed(self.scheduler.timesteps)
+
+            self.min_step = 1 if self.cfg.min_step_percent <= 0 else int(len(timesteps) * self.cfg.min_step_percent)
+            max_step = (
+                len(timesteps) if self.cfg.max_step_percent >= 1 else int(len(timesteps) * self.cfg.max_step_percent)
+            )
+            self.max_step = max(max_step, self.min_step + 1)
+
+            timestep_index = torch.full((batch_size,), (self.max_step - self.min_step) * ((self.max_iteration - self.iteration) / self.max_iteration) + self.min_step, dtype=torch.long, device="cpu")
+
+            t = timesteps[timestep_index].to(self.device)
+            t_noralized = timestep_index[0].item() / len(timesteps)
+        else:
+            # timestep ~ U(0.02, 0.98) to avoid very high/low noise level
+            t = torch.randint(
+                self.min_step,
+                self.max_step + 1,
+                [batch_size],
+                dtype=torch.long,
+                device=self.device,
+            )
+    
+        self.iteration += 1
+
+        if self.cfg.use_dds:
+            grad = self.compute_grad_dds(
+                target_latents, 
+                source_latents,
+                target_text_embeddings, 
+                source_text_embeddings, 
+                cond_latents, 
+                t,
+                t_noralized if self.cfg.use_dreamcatalyst else None
+            )
             grad = torch.nan_to_num(grad)
             if self.grad_clip_val is not None:
                 grad = grad.clamp(-self.grad_clip_val, self.grad_clip_val)
-            target = (latents - grad).detach()
-            loss_sds = 0.5 * F.mse_loss(latents, target, reduction="sum") / batch_size
+            target = (target_latents - grad).detach()
+            loss_dds = 0.5 * F.mse_loss(target_latents, target, reduction="sum") / batch_size
             return {
-                "loss_sds": loss_sds,
+                "loss_dds": loss_dds,
                 "grad_norm": grad.norm(),
                 "min_step": self.min_step,
                 "max_step": self.max_step,
             }
         else:
-            edit_latents = self.edit_latents(text_embeddings, latents, cond_latents, t)
+            edit_latents = self.edit_latents(target_text_embeddings, target_latents, cond_latents, t)
             edit_images = self.decode_latents(edit_latents)
             edit_images = F.interpolate(edit_images, (H, W), mode="bilinear")
 
@@ -310,10 +378,11 @@ class InstructPix2PixGuidance(BaseObject):
         if self.cfg.grad_clip is not None:
             self.grad_clip_val = C(self.cfg.grad_clip, epoch, global_step)
 
-        self.set_min_max_steps(
-            min_step_percent=C(self.cfg.min_step_percent, epoch, global_step),
-            max_step_percent=C(self.cfg.max_step_percent, epoch, global_step),
-        )
+        if not self.cfg.use_dreamcatalyst:
+            self.set_min_max_steps(
+                min_step_percent=C(self.cfg.min_step_percent, epoch, global_step),
+                max_step_percent=C(self.cfg.max_step_percent, epoch, global_step),
+            )
 
 
 if __name__ == "__main__":
