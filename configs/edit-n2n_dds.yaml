@@ -56,7 +56,7 @@ system:
   second_guidance:
     min_step_percent: 0.2
     max_step_percent: 0.9
-    psi: 0.5
+    pi: 0.075
     diffusion_steps: 500
     use_dds: true
     use_dreamcatalyst: true

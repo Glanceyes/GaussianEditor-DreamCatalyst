@@ -46,7 +46,7 @@ class InstructPix2PixDDSGuidance(BaseObject):
         diffusion_steps: int = 50 # 20
         max_iteration: int = 1500
 
-        psi: float = 0.075
+        pi: float = 0.075
         delta: float  = 0.2
         gamma: float = 0.8
 
@@ -283,7 +283,8 @@ class InstructPix2PixDDSGuidance(BaseObject):
 
         if t_normalized is not None and self.cfg.use_dreamcatalyst:
             w = self.cfg.delta + self.cfg.gamma * (t_normalized ** (1/math.e))
-            grad = (self.cfg.psi * (math.exp(t_normalized))) * (eps["target"] - eps["source"]) + w * (tgt_latents - src_latents)
+            # grad = (self.cfg.psi * (math.exp(t_normalized))) * (eps["target"] - eps["source"]) + w * (tgt_latents - src_latents)
+            grad = (self.cfg.pi * (math.exp(t_normalized))) * (tgt_latents - src_latents) + w * (eps["target"] - eps["source"])
         else:
             w = (1 - self.alphas[t]).view(-1, 1, 1, 1)
             grad = w * (eps['target'] - eps['source'])
