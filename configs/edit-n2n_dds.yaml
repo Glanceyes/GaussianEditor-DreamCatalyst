@@ -22,8 +22,8 @@ system:
   gs_source: ???
   per_editing_step: 10
   edit_begin_step: 0
-  densify_until_iter: 200000
-  densify_from_iter: 0
+  densify_until_iter: 1501
+  densify_from_iter: 100
   densification_interval: 100
   max_grad: 5
   min_opacity: 0.005
@@ -56,7 +56,8 @@ system:
   second_guidance:
     min_step_percent: 0.2
     max_step_percent: 0.9
-    psi: 1.0
+    psi: 0.5
+    diffusion_steps: 500
     use_dds: true
     use_dreamcatalyst: true
 

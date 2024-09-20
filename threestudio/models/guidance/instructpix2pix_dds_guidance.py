@@ -14,6 +14,7 @@ from threestudio.models.prompt_processors.base import PromptProcessorOutput
 from threestudio.utils.base import BaseObject
 from threestudio.utils.misc import C, parse_version
 from threestudio.utils.typing import *
+from threestudio.utils.free_lunch import register_free_upblock2d_in, register_free_crossattn_upblock2d_in
 
 
 @threestudio.register("stable-diffusion-instructpix2pix-dds-guidance")
@@ -52,6 +53,13 @@ class InstructPix2PixDDSGuidance(BaseObject):
         use_dds: bool = True
         # use_dreamcatalyst: bool = True
         use_dreamcatalyst: bool = False
+
+        # FreeU
+        freeu_b1: float=1.1
+        freeu_b2: float=1.1
+        freeu_s1: float=0.9
+        freeu_s2: float=0.2
+
 
     cfg: Config
 
@@ -122,6 +130,15 @@ class InstructPix2PixDDSGuidance(BaseObject):
 
         self.iteration = 0
         self.max_iteration = self.cfg.max_iteration
+
+        # FreeU
+        b1 = self.cfg.freeu_b1
+        b2 = self.cfg.freeu_b2
+        s1 = self.cfg.freeu_s1
+        s2 = self.cfg.freeu_s2
+
+        register_free_upblock2d_in(self.unet, b1, b2, s1, s2)
+        register_free_crossattn_upblock2d_in(self.unet, b1, b2, s1, s2)
 
         threestudio.info(f"Loaded InstructPix2Pix!")
 
